@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0c0f">
+  <title>KēRN — расчёт маржи</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Onest:wght@400;500;600&family=Unbounded:wght@600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=5">
+</head>
+<body>
+  <div class="ambient ambient-a"></div>
+  <div class="ambient ambient-b"></div>
+
+  <header class="topbar">
+    <img class="brand" src="assets/kern-logo.svg" alt="KēRN Global Technologies">
+    <div class="top-meta">
+      <span class="status-dot"></span>
+      <span>ВНУТРЕННИЙ ИНСТРУМЕНТ</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="intro">
+      <div class="eyebrow">KēRN / FINANCE TOOL</div>
+      <h1>РАСЧЁТ<br><span>МАРЖИ</span></h1>
+      <p>Загрузите счёт в формате PDF или введите данные вручную. Сервис сопоставит позиции с ценой отгрузки БАСА и соберёт короткий отчёт.</p>
+    </section>
+
+    <section class="workspace">
+      <article class="panel input-panel">
+        <div class="panel-head">
+          <div>
+            <span class="step">01</span>
+            <h2>ИСХОДНЫЕ ДАННЫЕ</h2>
+          </div>
+        </div>
+
+        <div class="mode-switch" role="tablist" aria-label="Способ ввода">
+          <button class="mode active" type="button" data-mode="pdf" role="tab" aria-selected="true">ЗАГРУЗИТЬ PDF</button>
+          <button class="mode" type="button" data-mode="text" role="tab" aria-selected="false">ДОБАВИТЬ ВРУЧНУЮ</button>
+        </div>
+
+        <div id="pdfMode" class="mode-content active">
+          <input id="pdfInput" type="file" accept="application/pdf,.pdf" hidden>
+          <label id="dropZone" class="drop-zone" for="pdfInput">
+            <span class="upload-mark">↑</span>
+            <strong id="fileTitle">ВЫБРАТЬ СЧЁТ В PDF</strong>
+            <span id="fileNote">или перетащите файл сюда</span>
+          </label>
+        </div>
+
+        <div id="textMode" class="mode-content">
+          <label class="field-label" for="salesText">Продажа</label>
+          <textarea id="salesText" spellcheck="false" placeholder="Иван (нал):&#10;М-3 керамика 1 шт — 1250 руб.&#10;&#10;Сергей (безнал):&#10;MX-30 1 шт — 2950 руб."></textarea>
+          <p class="helper">Впишите все проданные позиции каждому из партнёров. Для каждого партнёра укажите способ оплаты в скобках: «нал» или «безнал».</p>
+        </div>
+
+        <div class="payment-info">
+          <span>Способ оплаты</span>
+          <strong id="paymentMode">Определяется автоматически</strong>
+        </div>
+
+        <button id="calculate" class="calculate" type="button">
+          <span>РАССЧИТАТЬ</span>
+          <span aria-hidden="true">↗</span>
+        </button>
+        <div id="inputError" class="input-error" role="alert"></div>
+      </article>
+
+      <article class="panel result-panel">
+        <div class="panel-head">
+          <div>
+            <span class="step">02</span>
+            <h2>ОТЧЁТ</h2>
+          </div>
+          <button id="copyReport" class="copy-button" type="button" disabled>КОПИРОВАТЬ</button>
+        </div>
+
+        <div id="resultEmpty" class="result-empty">
+          <div class="result-orbit"><span></span></div>
+          <p>Здесь появится готовый расчёт — короткий, понятный и сразу пригодный для отправки.</p>
+        </div>
+
+        <div id="resultReady" class="result-ready" hidden>
+          <div id="reportMeta" class="report-meta"></div>
+          <div id="reportGroups"></div>
+          <div id="reportTotal" class="report-total"></div>
+        </div>
+      </article>
+    </section>
+
+    <section id="reviewPanel" class="review-panel" hidden>
+      <div class="review-head">
+        <div><span class="step">!</span><h2>НУЖНА ПРОВЕРКА</h2></div>
+        <p>Не все позиции удалось уверенно сопоставить с матрицей БАСА.</p>
+      </div>
+      <div id="reviewRows"></div>
+      <button id="recalculate" class="secondary-button" type="button">ПЕРЕСЧИТАТЬ</button>
+    </section>
+  </main>
+
+  <footer>
+    <span>KēRN GLOBAL TECHNOLOGIES</span>
+  </footer>
+
+  <script src="catalog.js?v=1"></script>
+  <script src="app.js?v=11"></script>
+</body>
+</html>
+
