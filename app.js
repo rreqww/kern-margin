@@ -151,8 +151,8 @@
   }
 
   async function readPdf(file) {
-    const pdfjs = await import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs');
-    pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
+    const pdfjs = await import('./pdf.min.mjs');
+    pdfjs.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs';
     const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
     const pages = [];
     for (let pageNo = 1; pageNo <= pdf.numPages; pageNo++) {
