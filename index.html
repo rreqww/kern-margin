@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Onest:wght@400;500;600&family=Unbounded:wght@600;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=6">
+  <link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -63,6 +63,14 @@
           <strong id="paymentMode">Определяется автоматически</strong>
         </div>
 
+        <div class="logistics-field">
+          <label for="logisticsCost">
+            <span>Логистика, ₽</span>
+            <small>Распределяется между партнёрами пропорционально количеству единиц</small>
+          </label>
+          <input id="logisticsCost" type="number" min="0" step="1" inputmode="numeric" value="0" aria-label="Затраты на логистику в рублях">
+        </div>
+
         <button id="calculate" class="calculate" type="button">
           <span>РАССЧИТАТЬ</span>
           <span aria-hidden="true">↗</span>
@@ -107,7 +115,7 @@
   </footer>
 
   <script src="catalog.js?v=1"></script>
-  <script src="app.js?v=11"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>
 
