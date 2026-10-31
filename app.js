@@ -4,7 +4,7 @@
   const data = window.KERN_CATALOG || { source: {}, items: [] };
   const catalog = data.items || [];
   const rub = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
-  const state = { mode: 'pdf', file: null, rows: [], meta: {}, reportText: '' };
+  const state = { mode: 'pdf', files: [], rows: [], documents: [], meta: {}, reportText: '' };
   const $ = id => document.getElementById(id);
   const num = value => Number(String(value ?? '').replace(/\s/g, '').replace(',', '.')) || 0;
   const fmt = value => `${rub.format(Math.round(Number(value) || 0))} ₽`;
@@ -171,10 +171,10 @@
     return parseInvoiceText(pages.join('\n'));
   }
 
-  function hydrateRows(parsed) {
+  function hydrateRows(parsed, documentId = 'manual') {
     return parsed.rows.map((source, index) => {
       const match = matchCatalog(source.description);
-      return { ...source, id: `${Date.now()}-${index}`, catalogRow: match.item?.row || null, confidence: match.confidence };
+      return { ...source, documentId, id: `${documentId}-${Date.now()}-${index}`, catalogRow: match.item?.row || null, confidence: match.confidence };
     });
   }
 
@@ -194,52 +194,70 @@
 
   function calculateModel() {
     const valid = state.rows.filter(row => row.catalogRow && num(row.qty) > 0);
-    const groupsMap = new Map();
+    const documentsMap = new Map();
     valid.forEach(row => {
       const item = catalogItem(row.catalogRow);
       const raw = (num(row.salePrice) - item.base) * num(row.qty);
       const calculated = { ...row, item, raw, counted: Math.max(0, raw), revenue: num(row.salePrice) * num(row.qty), baseTotal: item.base * num(row.qty) };
+      const sourceDocument = state.documents.find(document => document.id === row.documentId) || { id: row.documentId, meta: {} };
+      if (!documentsMap.has(row.documentId)) documentsMap.set(row.documentId, { ...sourceDocument, groupsMap: new Map() });
+      const document = documentsMap.get(row.documentId);
       const key = `${row.partner}|||${row.payment}`;
-      if (!groupsMap.has(key)) groupsMap.set(key, { partner: row.partner, payment: row.payment, rows: [] });
-      groupsMap.get(key).rows.push(calculated);
+      if (!document.groupsMap.has(key)) document.groupsMap.set(key, { partner: row.partner, payment: row.payment, rows: [] });
+      document.groupsMap.get(key).rows.push(calculated);
     });
-    const groups = [...groupsMap.values()];
-    const totalGross = groups.reduce((sum, group) => sum + group.rows.reduce((part, row) => part + row.counted, 0), 0);
-    groups.forEach(group => {
-      group.gross = group.rows.reduce((sum, row) => sum + row.counted, 0);
-      group.tax = group.payment === 'cashless' ? Math.round(group.gross * .07) : 0;
-      group.net = group.gross - group.tax;
+    const documents = [...documentsMap.values()].map(document => {
+      const groups = [...document.groupsMap.values()];
+      groups.forEach(group => {
+        group.gross = group.rows.reduce((sum, row) => sum + row.counted, 0);
+        group.tax = group.payment === 'cashless' ? Math.round(group.gross * .07) : 0;
+        group.net = group.gross - group.tax;
+      });
+      return {
+        id: document.id,
+        meta: document.meta || {},
+        groups,
+        lines: groups.reduce((sum, group) => sum + group.rows.length, 0),
+        units: groups.reduce((sum, group) => sum + group.rows.reduce((part, row) => part + num(row.qty), 0), 0),
+        revenue: groups.reduce((sum, group) => sum + group.rows.reduce((part, row) => part + row.revenue, 0), 0),
+        baseTotal: groups.reduce((sum, group) => sum + group.rows.reduce((part, row) => part + row.baseTotal, 0), 0),
+        gross: groups.reduce((sum, group) => sum + group.gross, 0),
+        tax: groups.reduce((sum, group) => sum + group.tax, 0),
+        net: groups.reduce((sum, group) => sum + group.net, 0)
+      };
     });
     return {
-      groups,
+      documents,
       lines: valid.length,
       units: valid.reduce((sum,row) => sum + num(row.qty), 0),
-      revenue: groups.reduce((sum,group) => sum + group.rows.reduce((part,row) => part + row.revenue, 0), 0),
-      baseTotal: groups.reduce((sum,group) => sum + group.rows.reduce((part,row) => part + row.baseTotal, 0), 0),
-      gross: totalGross,
-      tax: groups.reduce((sum,group) => sum + group.tax, 0),
-      net: groups.reduce((sum,group) => sum + group.net, 0)
+      revenue: documents.reduce((sum, document) => sum + document.revenue, 0),
+      baseTotal: documents.reduce((sum, document) => sum + document.baseTotal, 0),
+      gross: documents.reduce((sum, document) => sum + document.gross, 0),
+      tax: documents.reduce((sum, document) => sum + document.tax, 0),
+      net: documents.reduce((sum, document) => sum + document.net, 0)
     };
   }
 
   function buildPlainReport(model) {
-    const lines = ['ОТЧЁТ ПО ПРОДАЖЕ'];
-    if (state.meta.invoice) lines.push(`Счёт №${state.meta.invoice}${state.meta.date ? ` от ${state.meta.date}` : ''}`);
-    lines.push('', 'Расчёт: количество × (продажа − БАСА) = маржа');
-    model.groups.forEach((group, groupIndex) => {
-      if (model.groups.length > 1 || !state.meta.invoice) lines.push('', `${group.partner} · ${group.payment === 'cashless' ? 'безнал (−7%)' : 'наличные'}`);
-      else lines.push(`Партнёр: ${group.partner}`, `Оплата: ${group.payment === 'cashless' ? 'безнал (−7% от маржи)' : 'наличные'}`, '');
-      group.rows.forEach(row => {
-        const negative = row.raw < 0 ? ` · учтено 0 ₽ (фактически ${fmt(row.raw)})` : '';
-        lines.push(`• ${itemShort(row.item)} (${rub.format(row.qty)} шт.): ${rub.format(row.qty)} × (${fmt(row.salePrice)} − ${fmt(row.item.base)}) = ${fmt(row.counted)}${negative}`);
+    const multiple = model.documents.length > 1;
+    const lines = [multiple ? `СВОДНЫЙ ОТЧЁТ · ${model.documents.length} СЧЁТА` : 'ОТЧЁТ ПО ПРОДАЖЕ', '', 'Расчёт: количество × (продажа − БАСА) = маржа'];
+    model.documents.forEach((document, documentIndex) => {
+      const title = document.meta.invoice ? `СЧЁТ №${document.meta.invoice}${document.meta.date ? ` от ${document.meta.date}` : ''}` : (document.meta.fileName || 'ПРОДАЖА');
+      lines.push('', title);
+      document.groups.forEach((group, groupIndex) => {
+        lines.push(`${group.partner} · ${group.payment === 'cashless' ? 'безнал (−7%)' : 'наличные'}`);
+        group.rows.forEach(row => {
+          const negative = row.raw < 0 ? ` · учтено 0 ₽ (фактически ${fmt(row.raw)})` : '';
+          lines.push(`• ${itemShort(row.item)} (${rub.format(row.qty)} шт.): ${rub.format(row.qty)} × (${fmt(row.salePrice)} − ${fmt(row.item.base)}) = ${fmt(row.counted)}${negative}`);
+        });
+        if (group.tax) lines.push(`  Вычет 7%: −${fmt(group.tax)}`);
+        lines.push(`  Итого партнёра: ${fmt(group.net)}`);
+        if (groupIndex < document.groups.length - 1) lines.push('');
       });
-      if (model.groups.length > 1) {
-        if (group.tax) lines.push(`  7% от маржи: −${fmt(group.tax)}`);
-        lines.push(`  Итого ${group.partner}: ${fmt(group.net)}`);
-      }
-      if (groupIndex < model.groups.length - 1) lines.push('');
+      lines.push(`Итого по счёту: продажа ${fmt(document.revenue)} · маржа ${fmt(document.gross)}${document.tax ? ` · вычет −${fmt(document.tax)}` : ''} · итог ${fmt(document.net)}`);
+      if (documentIndex < model.documents.length - 1) lines.push('');
     });
-    lines.push('', 'ИТОГО', `${model.lines} поз. · ${rub.format(model.units)} ед.`, `Продажа: ${fmt(model.revenue)}`, `БАСА: ${fmt(model.baseTotal)}`, `Маржа товаров: ${fmt(model.gross)}`);
+    lines.push('', multiple ? 'ОБЩАЯ СВОДКА' : 'ИТОГО', `${model.documents.length} сч. · ${model.lines} поз. · ${rub.format(model.units)} ед.`, `Продажа: ${fmt(model.revenue)}`, `БАСА: ${fmt(model.baseTotal)}`, `Маржа товаров: ${fmt(model.gross)}`);
     if (model.tax) lines.push(`Вычет 7%: −${fmt(model.tax)}`);
     lines.push(`ИТОГОВАЯ МАРЖА: ${fmt(model.net)}`);
     return lines.join('\n');
@@ -249,11 +267,19 @@
     $('resultEmpty').hidden = true;
     $('resultReady').hidden = false;
     $('copyReport').disabled = false;
-    const invoiceLine = state.meta.invoice ? `<h3>СЧЁТ №${esc(state.meta.invoice)}</h3>` : '<h3>РАСЧЁТ ПРОДАЖИ</h3>';
-    $('reportMeta').innerHTML = `${invoiceLine}<p>${esc(state.meta.date || new Intl.DateTimeFormat('ru-RU').format(new Date()))}</p><p>КОЛИЧЕСТВО × (ПРОДАЖА − БАСА) = МАРЖА</p>`;
-    $('reportGroups').innerHTML = model.groups.map(group => {
-      const rows = group.rows.map(row => `<div class="report-line"><span>${esc(itemShort(row.item))} (${rub.format(row.qty)} шт.)<small class="negative-note">${row.raw < 0 ? `Учтено 0 ₽ · фактически ${fmt(row.raw)}` : ''}</small></span><strong>${rub.format(row.qty)} × (${fmt(row.salePrice)} − ${fmt(row.item.base)}) = ${fmt(row.counted)}</strong></div>`).join('');
-      return `<section class="report-group"><div class="report-group-head"><strong>${esc(group.partner)}</strong><span class="payment-badge">${group.payment === 'cashless' ? 'БЕЗНАЛ · −7%' : 'НАЛИЧНЫЕ'}</span></div>${rows}<div class="group-subtotal"><div><span>МАРЖА ТОВАРОВ</span><strong>${fmt(group.gross)}</strong></div><div><span>ВЫЧЕТ 7%</span><strong>${fmt(group.tax)}</strong></div><div><span>ИТОГО ПАРТНЁРА</span><strong>${fmt(group.net)}</strong></div></div></section>`;
+    const multiple = model.documents.length > 1;
+    const firstMeta = model.documents[0]?.meta || {};
+    const invoiceLine = multiple ? `<h3>СВОДНЫЙ ОТЧЁТ · ${model.documents.length} СЧЁТА</h3>` : (firstMeta.invoice ? `<h3>СЧЁТ №${esc(firstMeta.invoice)}</h3>` : '<h3>РАСЧЁТ ПРОДАЖИ</h3>');
+    $('reportMeta').innerHTML = `${invoiceLine}<p>${multiple ? 'Каждый счёт рассчитан отдельно' : esc(firstMeta.date || new Intl.DateTimeFormat('ru-RU').format(new Date()))}</p><p>КОЛИЧЕСТВО × (ПРОДАЖА − БАСА) = МАРЖА</p>`;
+    $('reportGroups').innerHTML = model.documents.map(document => {
+      const title = document.meta.invoice ? `СЧЁТ №${esc(document.meta.invoice)}` : esc(document.meta.fileName || 'ПРОДАЖА');
+      const header = multiple ? `<div class="report-document-head"><h4>${title}</h4><span>${esc(document.meta.date || '')}</span></div>` : '';
+      const groups = document.groups.map(group => {
+        const rows = group.rows.map(row => `<div class="report-line"><span>${esc(itemShort(row.item))} (${rub.format(row.qty)} шт.)<small class="negative-note">${row.raw < 0 ? `Учтено 0 ₽ · фактически ${fmt(row.raw)}` : ''}</small></span><strong>${rub.format(row.qty)} × (${fmt(row.salePrice)} − ${fmt(row.item.base)}) = ${fmt(row.counted)}</strong></div>`).join('');
+        return `<section class="report-group"><div class="report-group-head"><strong>${esc(group.partner)}</strong><span class="payment-badge">${group.payment === 'cashless' ? 'БЕЗНАЛ · −7%' : 'НАЛИЧНЫЕ'}</span></div>${rows}<div class="group-subtotal"><div><span>МАРЖА ТОВАРОВ</span><strong>${fmt(group.gross)}</strong></div><div><span>ВЫЧЕТ 7%</span><strong>${fmt(group.tax)}</strong></div><div><span>ИТОГО ПАРТНЁРА</span><strong>${fmt(group.net)}</strong></div></div></section>`;
+      }).join('');
+      const documentTotal = multiple ? `<div class="document-total"><div class="summary-row"><span>Итого по счёту · ${document.lines} поз. · ${rub.format(document.units)} ед.</span><strong>${fmt(document.net)}</strong></div><div class="summary-row"><span>Продажа ${fmt(document.revenue)} · маржа ${fmt(document.gross)}</span><strong>${document.tax ? `−${fmt(document.tax)} (7%)` : 'без вычета'}</strong></div></div>` : '';
+      return `<section class="report-document">${header}${groups}${documentTotal}</section>`;
     }).join('');
     const tax = model.tax ? `<div class="summary-row"><span>Вычет 7%</span><strong>−${fmt(model.tax)}</strong></div>` : '';
     $('reportTotal').innerHTML = `<div class="summary-row"><span>${model.lines} поз. · ${rub.format(model.units)} ед.</span><strong>Продажа ${fmt(model.revenue)}</strong></div><div class="summary-row"><span>Цена отгрузки БАСА</span><strong>${fmt(model.baseTotal)}</strong></div><div class="summary-row"><span>Маржа товаров</span><strong>${fmt(model.gross)}</strong></div>${tax}<div class="summary-row final"><span>ИТОГОВАЯ МАРЖА</span><strong>${fmt(model.net)}</strong></div>`;
@@ -281,17 +307,28 @@
     try {
       let parsed;
       if (state.mode === 'pdf') {
-        if (!state.file) throw new Error('Сначала выберите счёт в PDF.');
-        parsed = await readPdf(state.file);
-        if (!parsed.rows.length) throw new Error('Не удалось выделить товарные позиции из PDF.');
+        if (!state.files.length) throw new Error('Сначала выберите один или несколько счетов в PDF.');
+        const parsedDocuments = [];
+        for (let index = 0; index < state.files.length; index++) {
+          const file = state.files[index];
+          const documentParsed = await readPdf(file);
+          if (!documentParsed.rows.length) throw new Error(`Не удалось выделить товарные позиции из файла «${file.name}».`);
+          const id = `pdf-${index}`;
+          documentParsed.meta.fileName = file.name;
+          parsedDocuments.push({ id, parsed: documentParsed });
+        }
+        state.documents = parsedDocuments.map(document => ({ id: document.id, meta: document.parsed.meta }));
+        state.meta = state.documents.length === 1 ? state.documents[0].meta : {};
+        state.rows = parsedDocuments.flatMap(document => hydrateRows(document.parsed, document.id));
       } else {
         parsed = parseFreeText($('salesText').value);
         if (!parsed.rows.length) throw new Error('Не нашёл строки вида «Товар 2 шт — 1500 руб.».');
         const unspecified = [...new Set(parsed.rows.filter(row => !row.payment).map(row => row.partner))];
         if (unspecified.length) throw new Error(`Укажите способ оплаты в заголовке: ${unspecified.map(name => `${name} (нал) или ${name} (безнал)`).join('; ')}.`);
+        state.documents = [{ id: 'manual', meta: parsed.meta }];
+        state.meta = parsed.meta;
+        state.rows = hydrateRows(parsed, 'manual');
       }
-      state.meta = parsed.meta;
-      state.rows = hydrateRows(parsed);
       renderReview();
       const model = calculateModel();
       if (!model.lines) throw new Error('Ни одна позиция пока не сопоставлена с матрицей БАСА. Проверьте блок ниже.');
@@ -314,16 +351,19 @@
     $('inputError').textContent = '';
   }));
 
-  $('pdfInput').addEventListener('change', event => selectFile(event.target.files[0]));
+  $('pdfInput').addEventListener('change', event => selectFiles(event.target.files));
   $('dropZone').addEventListener('dragover', event => { event.preventDefault(); $('dropZone').classList.add('dragging'); });
   $('dropZone').addEventListener('dragleave', () => $('dropZone').classList.remove('dragging'));
-  $('dropZone').addEventListener('drop', event => { event.preventDefault(); $('dropZone').classList.remove('dragging'); selectFile(event.dataTransfer.files[0]); });
-  function selectFile(file) {
-    if (!file) return;
-    if (!/\.pdf$/i.test(file.name)) { $('inputError').textContent = 'Нужен файл в формате PDF.'; return; }
-    state.file = file;
-    $('fileTitle').textContent = file.name;
-    $('fileNote').textContent = `${(file.size / 1024).toFixed(0)} КБ · готов к расчёту`;
+  $('dropZone').addEventListener('drop', event => { event.preventDefault(); $('dropZone').classList.remove('dragging'); selectFiles(event.dataTransfer.files); });
+  function selectFiles(fileList) {
+    const files = [...(fileList || [])];
+    if (!files.length) return;
+    const pdfFiles = files.filter(file => /\.pdf$/i.test(file.name));
+    if (pdfFiles.length !== files.length) { $('inputError').textContent = 'Можно загружать только файлы в формате PDF.'; return; }
+    state.files = pdfFiles;
+    const totalSize = pdfFiles.reduce((sum, file) => sum + file.size, 0);
+    $('fileTitle').textContent = pdfFiles.length === 1 ? pdfFiles[0].name : `${pdfFiles.length} СЧЁТА ВЫБРАНО`;
+    $('fileNote').textContent = pdfFiles.length === 1 ? `${(totalSize / 1024).toFixed(0)} КБ · готов к расчёту` : `${(totalSize / 1024).toFixed(0)} КБ · будут рассчитаны отдельно и сведены вместе`;
     $('inputError').textContent = '';
   }
 

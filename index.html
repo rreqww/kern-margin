@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Onest:wght@400;500;600&family=Unbounded:wght@600;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=5">
+  <link rel="stylesheet" href="styles.css?v=6">
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -26,7 +26,7 @@
     <section class="intro">
       <div class="eyebrow">KēRN / FINANCE TOOL</div>
       <h1>РАСЧЁТ<br><span>МАРЖИ</span></h1>
-      <p>Загрузите счёт в формате PDF или введите данные вручную. Сервис сопоставит позиции с ценой отгрузки БАСА и соберёт короткий отчёт.</p>
+      <p>Загрузите один или несколько счетов в PDF либо введите данные вручную. Сервис разберёт каждый счёт отдельно и соберёт общую сводку по марже.</p>
     </section>
 
     <section class="workspace">
@@ -44,11 +44,11 @@
         </div>
 
         <div id="pdfMode" class="mode-content active">
-          <input id="pdfInput" type="file" accept="application/pdf,.pdf" hidden>
+          <input id="pdfInput" type="file" accept="application/pdf,.pdf" multiple hidden>
           <label id="dropZone" class="drop-zone" for="pdfInput">
             <span class="upload-mark">↑</span>
-            <strong id="fileTitle">ВЫБРАТЬ СЧЁТ В PDF</strong>
-            <span id="fileNote">или перетащите файл сюда</span>
+            <strong id="fileTitle">ВЫБРАТЬ СЧЕТА В PDF</strong>
+            <span id="fileNote">один или несколько файлов · можно перетащить сюда</span>
           </label>
         </div>
 
