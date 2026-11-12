@@ -3,6 +3,7 @@
 
   const data = window.KERN_CATALOG || { source: {}, items: [] };
   const catalog = data.items || [];
+  const pdfParser = window.KERN_PDF_PARSER;
   const rub = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
   const state = { mode: 'pdf', files: [], rows: [], documents: [], meta: {}, reportText: '' };
   const $ = id => document.getElementById(id);
@@ -71,7 +72,9 @@
   }
 
   function cashByInvoice(invoice) {
-    return /^[0OО]/i.test(String(invoice || '').trim()) ? 'cash' : 'cashless';
+    const value = String(invoice || '').toUpperCase().replace(/[\s№#._-]/g, '');
+    if (!value) return null;
+    return /^[0OО]/i.test(value) ? 'cash' : /^\d+$/.test(value) ? 'cashless' : null;
   }
 
   function cleanPartner(value) {
@@ -151,6 +154,7 @@
   }
 
   async function readPdf(file) {
+    if (!pdfParser) throw new Error('Не загрузился модуль чтения PDF. Обновите страницу и попробуйте снова.');
     const pdfjs = await import('./pdf.min.mjs');
     pdfjs.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs';
     const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
@@ -158,17 +162,9 @@
     for (let pageNo = 1; pageNo <= pdf.numPages; pageNo++) {
       const page = await pdf.getPage(pageNo);
       const content = await page.getTextContent();
-      const groups = [];
-      content.items.forEach(item => {
-        const x = item.transform[4], y = item.transform[5];
-        let group = groups.find(candidate => Math.abs(candidate.y - y) < 2.2);
-        if (!group) { group = { y, parts: [] }; groups.push(group); }
-        group.parts.push({ x, text: item.str });
-      });
-      groups.sort((a,b) => b.y - a.y);
-      pages.push(groups.map(group => group.parts.sort((a,b) => a.x - b.x).map(part => part.text).join(' ').replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n'));
+      pages.push(pdfParser.groupTextItems(content.items, pageNo));
     }
-    return parseInvoiceText(pages.join('\n'));
+    return pdfParser.parseInvoicePages(pages);
   }
 
   function hydrateRows(parsed, documentId = 'manual') {
@@ -338,6 +334,15 @@
           const file = state.files[index];
           const documentParsed = await readPdf(file);
           if (!documentParsed.rows.length) throw new Error(`Не удалось выделить товарные позиции из файла «${file.name}».`);
+          if (!documentParsed.meta.invoice) throw new Error(`Не удалось распознать номер счёта в файле «${file.name}». Расчёт остановлен, чтобы не определить способ оплаты неправильно.`);
+          if (!documentParsed.meta.payment) throw new Error(`Не удалось определить наличный или безналичный расчёт в файле «${file.name}». Проверьте номер счёта.`);
+          if (documentParsed.meta.partner === 'Партнёр не указан') throw new Error(`Не удалось распознать покупателя в файле «${file.name}». Расчёт остановлен для проверки.`);
+          const invalidLine = documentParsed.rows.find(row => row.lineTotal && Math.abs(row.qty * row.salePrice - row.lineTotal) > 1);
+          if (invalidLine) throw new Error(`В файле «${file.name}» не сошлись количество, цена и сумма позиции «${invalidLine.description}». Расчёт остановлен для проверки.`);
+          const parsedRevenue = documentParsed.rows.reduce((sum, row) => sum + row.qty * row.salePrice, 0);
+          if (documentParsed.meta.invoiceTotal && Math.abs(parsedRevenue - documentParsed.meta.invoiceTotal) > 1) {
+            throw new Error(`Файл «${file.name}» прочитан не полностью: сумма позиций ${fmt(parsedRevenue)}, а итог счёта ${fmt(documentParsed.meta.invoiceTotal)}. Расчёт остановлен для проверки.`);
+          }
           const id = `pdf-${index}`;
           documentParsed.meta.fileName = file.name;
           parsedDocuments.push({ id, parsed: documentParsed });
