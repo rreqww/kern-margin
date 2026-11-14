@@ -2,6 +2,7 @@
   'use strict';
 
   const Y_TOLERANCE = 2.2;
+  const MISSING_FIELD = '—';
   const money = value => Number(String(value ?? '').replace(/\s/g, '').replace(',', '.')) || 0;
   const normalized = value => String(value || '')
     .toUpperCase()
@@ -56,7 +57,7 @@
   function parseHeader(lines) {
     let invoice = '';
     let date = '';
-    let partner = 'Партнёр не указан';
+    let partner = MISSING_FIELD;
 
     for (const line of lines) {
       const lineKey = compact(line.text);
@@ -66,10 +67,10 @@
         const dateMatch = line.text.match(/\sот\s*(.+)$/i);
         if (dateMatch) date = dateMatch[1].trim();
       }
-      if (partner === 'Партнёр не указан' && lineKey.startsWith('ПОКУПАТЕЛЬ')) {
+      if (partner === MISSING_FIELD && lineKey.startsWith('ПОКУПАТЕЛЬ')) {
         const colon = line.text.indexOf(':');
         const value = colon >= 0 ? line.text.slice(colon + 1) : line.text.replace(/^\s*покупатель\s*/i, '');
-        if (value.trim()) partner = cleanPartner(value);
+        if (value.trim()) partner = cleanPartner(value) || MISSING_FIELD;
       }
     }
 
