@@ -7,6 +7,7 @@
   const rub = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
   const state = { mode: 'pdf', files: [], rows: [], documents: [], meta: {}, reportText: '' };
   const $ = id => document.getElementById(id);
+  const MISSING_FIELD = '—';
   const num = value => Number(String(value ?? '').replace(/\s/g, '').replace(',', '.')) || 0;
   const fmt = value => `${rub.format(Math.round(Number(value) || 0))} ₽`;
   const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -88,7 +89,7 @@
   function parseFreeText(text) {
     const lines = String(text || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
     const rows = [];
-    let partner = 'Партнёр не указан';
+    let partner = MISSING_FIELD;
     let payment = null;
     lines.forEach(line => {
       if (/^[^:]{1,100}:$/.test(line)) {
@@ -97,7 +98,7 @@
         const cash = !cashless && /(?:\(|[-—/,])\s*(?:ЗА\s+)?НАЛ[А-ЯЁ]*\.?\s*\)?$/i.test(header);
         partner = header
           .replace(/\s*(?:\(\s*|[-—/,]\s*)(?:(?:ПО\s+)?БЕЗ\s*НАЛ[А-ЯЁ]*|(?:ЗА\s+)?НАЛ[А-ЯЁ]*|-?7%)\.?\s*\)?\s*$/i, '')
-          .trim();
+          .trim() || MISSING_FIELD;
         payment = cashless ? 'cashless' : cash ? 'cash' : null;
         return;
       }
@@ -119,7 +120,7 @@
     const dateMatch = clean.match(/Сч[её]т\s+на\s+оплату\s*№\s*[^\s]+\s+от\s+([^\n]+)/i);
     const invoice = invoiceMatch ? invoiceMatch[1].trim() : '';
     const buyerMatch = clean.match(/Покупатель\s*:\s*([^\n]+)/i);
-    const partner = buyerMatch ? cleanPartner(buyerMatch[1]) : 'Партнёр не указан';
+    const partner = buyerMatch ? (cleanPartner(buyerMatch[1]) || MISSING_FIELD) : MISSING_FIELD;
     const start = clean.search(/№\s+Товары|Товары\s*\(работы/i);
     const end = clean.search(/Итого\s+к\s+оплате/i);
     const block = start >= 0 ? clean.slice(start, end > start ? end : undefined) : clean;
@@ -260,7 +261,7 @@
     const multiple = model.documents.length > 1;
     const lines = [multiple ? `СВОДНЫЙ ОТЧЁТ · ${model.documents.length} СЧЁТА` : 'ОТЧЁТ ПО ПРОДАЖЕ', '', 'Расчёт: количество × (продажа − БАСА) = маржа'];
     model.documents.forEach((document, documentIndex) => {
-      const title = document.meta.invoice ? `СЧЁТ №${document.meta.invoice}${document.meta.date ? ` от ${document.meta.date}` : ''}` : (document.meta.fileName || 'ПРОДАЖА');
+      const title = document.meta.invoice ? `СЧЁТ №${document.meta.invoice} от ${document.meta.date || MISSING_FIELD}` : (document.meta.fileName || 'ПРОДАЖА');
       lines.push('', title);
       document.groups.forEach((group, groupIndex) => {
         lines.push(`${group.partner} · ${group.payment === 'cashless' ? 'безнал (−7%)' : 'наличные'}`);
@@ -290,10 +291,10 @@
     const multiple = model.documents.length > 1;
     const firstMeta = model.documents[0]?.meta || {};
     const invoiceLine = multiple ? `<h3>СВОДНЫЙ ОТЧЁТ · ${model.documents.length} СЧЁТА</h3>` : (firstMeta.invoice ? `<h3>СЧЁТ №${esc(firstMeta.invoice)}</h3>` : '<h3>РАСЧЁТ ПРОДАЖИ</h3>');
-    $('reportMeta').innerHTML = `${invoiceLine}<p>${multiple ? 'Каждый счёт рассчитан отдельно' : esc(firstMeta.date || new Intl.DateTimeFormat('ru-RU').format(new Date()))}</p><p>КОЛИЧЕСТВО × (ПРОДАЖА − БАСА) = МАРЖА</p>`;
+    $('reportMeta').innerHTML = `${invoiceLine}<p>${multiple ? 'Каждый счёт рассчитан отдельно' : esc(firstMeta.date || MISSING_FIELD)}</p><p>КОЛИЧЕСТВО × (ПРОДАЖА − БАСА) = МАРЖА</p>`;
     $('reportGroups').innerHTML = model.documents.map(document => {
       const title = document.meta.invoice ? `СЧЁТ №${esc(document.meta.invoice)}` : esc(document.meta.fileName || 'ПРОДАЖА');
-      const header = multiple ? `<div class="report-document-head"><h4>${title}</h4><span>${esc(document.meta.date || '')}</span></div>` : '';
+      const header = multiple ? `<div class="report-document-head"><h4>${title}</h4><span>${esc(document.meta.date || MISSING_FIELD)}</span></div>` : '';
       const groups = document.groups.map(group => {
         const rows = group.rows.map(row => `<div class="report-line"><span>${esc(itemShort(row.item))} (${rub.format(row.qty)} шт.)<small class="negative-note">${row.raw < 0 ? `Учтено 0 ₽ · фактически ${fmt(row.raw)}` : ''}</small></span><strong>${rub.format(row.qty)} × (${fmt(row.salePrice)} − ${fmt(row.item.base)}) = ${fmt(row.counted)}</strong></div>`).join('');
         return `<section class="report-group"><div class="report-group-head"><strong>${esc(group.partner)}</strong><span class="payment-badge">${group.payment === 'cashless' ? 'БЕЗНАЛ · −7%' : 'НАЛИЧНЫЕ'}</span></div>${rows}<div class="group-subtotal"><div><span>МАРЖА ТОВАРОВ</span><strong>${fmt(group.gross)}</strong></div><div><span>ВЫЧЕТ 7%</span><strong>${fmt(group.tax)}</strong></div><div><span>ЛОГИСТИКА · ${rub.format(group.units)} ЕД.</span><strong>${group.logistics ? `−${fmt(group.logistics)}` : fmt(0)}</strong></div><div><span>ИТОГО ПАРТНЁРА</span><strong>${fmt(group.final)}</strong></div></div></section>`;
@@ -336,7 +337,6 @@
           if (!documentParsed.rows.length) throw new Error(`Не удалось выделить товарные позиции из файла «${file.name}».`);
           if (!documentParsed.meta.invoice) throw new Error(`Не удалось распознать номер счёта в файле «${file.name}». Расчёт остановлен, чтобы не определить способ оплаты неправильно.`);
           if (!documentParsed.meta.payment) throw new Error(`Не удалось определить наличный или безналичный расчёт в файле «${file.name}». Проверьте номер счёта.`);
-          if (documentParsed.meta.partner === 'Партнёр не указан') throw new Error(`Не удалось распознать покупателя в файле «${file.name}». Расчёт остановлен для проверки.`);
           const invalidLine = documentParsed.rows.find(row => row.lineTotal && Math.abs(row.qty * row.salePrice - row.lineTotal) > 1);
           if (invalidLine) throw new Error(`В файле «${file.name}» не сошлись количество, цена и сумма позиции «${invalidLine.description}». Расчёт остановлен для проверки.`);
           const parsedRevenue = documentParsed.rows.reduce((sum, row) => sum + row.qty * row.salePrice, 0);
