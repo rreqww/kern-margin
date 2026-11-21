@@ -207,8 +207,9 @@
       const groups = [...document.groupsMap.values()];
       groups.forEach(group => {
         group.units = group.rows.reduce((sum, row) => sum + num(row.qty), 0);
+        group.revenue = group.rows.reduce((sum, row) => sum + row.revenue, 0);
         group.gross = group.rows.reduce((sum, row) => sum + row.counted, 0);
-        group.tax = group.payment === 'cashless' ? Math.round(group.gross * .07) : 0;
+        group.tax = group.payment === 'cashless' ? Math.round(group.revenue * .07) : 0;
         group.net = group.gross - group.tax;
       });
       return {
@@ -217,7 +218,7 @@
         groups,
         lines: groups.reduce((sum, group) => sum + group.rows.length, 0),
         units: groups.reduce((sum, group) => sum + group.units, 0),
-        revenue: groups.reduce((sum, group) => sum + group.rows.reduce((part, row) => part + row.revenue, 0), 0),
+        revenue: groups.reduce((sum, group) => sum + group.revenue, 0),
         baseTotal: groups.reduce((sum, group) => sum + group.rows.reduce((part, row) => part + row.baseTotal, 0), 0),
         gross: groups.reduce((sum, group) => sum + group.gross, 0),
         tax: groups.reduce((sum, group) => sum + group.tax, 0),
@@ -259,26 +260,26 @@
 
   function buildPlainReport(model) {
     const multiple = model.documents.length > 1;
-    const lines = [multiple ? `СВОДНЫЙ ОТЧЁТ · ${model.documents.length} СЧЁТА` : 'ОТЧЁТ ПО ПРОДАЖЕ', '', 'Расчёт: количество × (продажа − БАСА) = маржа'];
+    const lines = [multiple ? `СВОДНЫЙ ОТЧЁТ · ${model.documents.length} СЧЁТА` : 'ОТЧЁТ ПО ПРОДАЖЕ', '', 'Расчёт: количество × (продажа − БАСА) = маржа', 'Безнал: 7% от суммы продажи'];
     model.documents.forEach((document, documentIndex) => {
       const title = document.meta.invoice ? `СЧЁТ №${document.meta.invoice} от ${document.meta.date || MISSING_FIELD}` : (document.meta.fileName || 'ПРОДАЖА');
       lines.push('', title);
       document.groups.forEach((group, groupIndex) => {
-        lines.push(`${group.partner} · ${group.payment === 'cashless' ? 'безнал (−7%)' : 'наличные'}`);
+        lines.push(`${group.partner} · ${group.payment === 'cashless' ? 'безнал (−7% от продажи)' : 'наличные'}`);
         group.rows.forEach(row => {
           const negative = row.raw < 0 ? ` · учтено 0 ₽ (фактически ${fmt(row.raw)})` : '';
           lines.push(`• ${itemShort(row.item)} (${rub.format(row.qty)} шт.): ${rub.format(row.qty)} × (${fmt(row.salePrice)} − ${fmt(row.item.base)}) = ${fmt(row.counted)}${negative}`);
         });
-        if (group.tax) lines.push(`  Вычет 7%: −${fmt(group.tax)}`);
+        if (group.tax) lines.push(`  Вычет 7% от продажи: −${fmt(group.tax)}`);
         if (group.logistics) lines.push(`  Логистика: −${fmt(group.logistics)} (${rub.format(group.units)} из ${rub.format(model.units)} ед.)`);
         lines.push(`  Итого партнёра: ${fmt(group.final)}`);
         if (groupIndex < document.groups.length - 1) lines.push('');
       });
-      lines.push(`Итого по счёту: продажа ${fmt(document.revenue)} · маржа ${fmt(document.gross)}${document.tax ? ` · вычет −${fmt(document.tax)}` : ''}${document.logistics ? ` · логистика −${fmt(document.logistics)}` : ''} · итог ${fmt(document.final)}`);
+      lines.push(`Итого по счёту: продажа ${fmt(document.revenue)} · маржа ${fmt(document.gross)}${document.tax ? ` · вычет 7% от продажи −${fmt(document.tax)}` : ''}${document.logistics ? ` · логистика −${fmt(document.logistics)}` : ''} · итог ${fmt(document.final)}`);
       if (documentIndex < model.documents.length - 1) lines.push('');
     });
     lines.push('', multiple ? 'ОБЩАЯ СВОДКА' : 'ИТОГО', `${model.documents.length} сч. · ${model.lines} поз. · ${rub.format(model.units)} ед.`, `Продажа: ${fmt(model.revenue)}`, `БАСА: ${fmt(model.baseTotal)}`, `Маржа товаров: ${fmt(model.gross)}`);
-    if (model.tax) lines.push(`Вычет 7%: −${fmt(model.tax)}`);
+    if (model.tax) lines.push(`Вычет 7% от продажи: −${fmt(model.tax)}`);
     if (model.logistics) lines.push(`Логистика: −${fmt(model.logistics)}`, 'Логистика распределена пропорционально количеству проданных единиц.');
     lines.push(`ИТОГОВАЯ МАРЖА: ${fmt(model.final)}`);
     return lines.join('\n');
@@ -291,18 +292,18 @@
     const multiple = model.documents.length > 1;
     const firstMeta = model.documents[0]?.meta || {};
     const invoiceLine = multiple ? `<h3>СВОДНЫЙ ОТЧЁТ · ${model.documents.length} СЧЁТА</h3>` : (firstMeta.invoice ? `<h3>СЧЁТ №${esc(firstMeta.invoice)}</h3>` : '<h3>РАСЧЁТ ПРОДАЖИ</h3>');
-    $('reportMeta').innerHTML = `${invoiceLine}<p>${multiple ? 'Каждый счёт рассчитан отдельно' : esc(firstMeta.date || MISSING_FIELD)}</p><p>КОЛИЧЕСТВО × (ПРОДАЖА − БАСА) = МАРЖА</p>`;
+    $('reportMeta').innerHTML = `${invoiceLine}<p>${multiple ? 'Каждый счёт рассчитан отдельно' : esc(firstMeta.date || MISSING_FIELD)}</p><p>КОЛИЧЕСТВО × (ПРОДАЖА − БАСА) = МАРЖА · БЕЗНАЛ: 7% ОТ ПРОДАЖИ</p>`;
     $('reportGroups').innerHTML = model.documents.map(document => {
       const title = document.meta.invoice ? `СЧЁТ №${esc(document.meta.invoice)}` : esc(document.meta.fileName || 'ПРОДАЖА');
       const header = multiple ? `<div class="report-document-head"><h4>${title}</h4><span>${esc(document.meta.date || MISSING_FIELD)}</span></div>` : '';
       const groups = document.groups.map(group => {
         const rows = group.rows.map(row => `<div class="report-line"><span>${esc(itemShort(row.item))} (${rub.format(row.qty)} шт.)<small class="negative-note">${row.raw < 0 ? `Учтено 0 ₽ · фактически ${fmt(row.raw)}` : ''}</small></span><strong>${rub.format(row.qty)} × (${fmt(row.salePrice)} − ${fmt(row.item.base)}) = ${fmt(row.counted)}</strong></div>`).join('');
-        return `<section class="report-group"><div class="report-group-head"><strong>${esc(group.partner)}</strong><span class="payment-badge">${group.payment === 'cashless' ? 'БЕЗНАЛ · −7%' : 'НАЛИЧНЫЕ'}</span></div>${rows}<div class="group-subtotal"><div><span>МАРЖА ТОВАРОВ</span><strong>${fmt(group.gross)}</strong></div><div><span>ВЫЧЕТ 7%</span><strong>${fmt(group.tax)}</strong></div><div><span>ЛОГИСТИКА · ${rub.format(group.units)} ЕД.</span><strong>${group.logistics ? `−${fmt(group.logistics)}` : fmt(0)}</strong></div><div><span>ИТОГО ПАРТНЁРА</span><strong>${fmt(group.final)}</strong></div></div></section>`;
+        return `<section class="report-group"><div class="report-group-head"><strong>${esc(group.partner)}</strong><span class="payment-badge">${group.payment === 'cashless' ? 'БЕЗНАЛ · −7% ОТ ПРОДАЖИ' : 'НАЛИЧНЫЕ'}</span></div>${rows}<div class="group-subtotal"><div><span>МАРЖА ТОВАРОВ</span><strong>${fmt(group.gross)}</strong></div><div><span>ВЫЧЕТ 7% ОТ ПРОДАЖИ</span><strong>${fmt(group.tax)}</strong></div><div><span>ЛОГИСТИКА · ${rub.format(group.units)} ЕД.</span><strong>${group.logistics ? `−${fmt(group.logistics)}` : fmt(0)}</strong></div><div><span>ИТОГО ПАРТНЁРА</span><strong>${fmt(group.final)}</strong></div></div></section>`;
       }).join('');
-      const documentTotal = multiple ? `<div class="document-total"><div class="summary-row"><span>Итого по счёту · ${document.lines} поз. · ${rub.format(document.units)} ед.</span><strong>${fmt(document.final)}</strong></div><div class="summary-row"><span>Продажа ${fmt(document.revenue)} · маржа ${fmt(document.gross)}</span><strong>${document.tax ? `−${fmt(document.tax)} (7%)` : 'без вычета'}</strong></div>${document.logistics ? `<div class="summary-row"><span>Логистика</span><strong>−${fmt(document.logistics)}</strong></div>` : ''}</div>` : '';
+      const documentTotal = multiple ? `<div class="document-total"><div class="summary-row"><span>Итого по счёту · ${document.lines} поз. · ${rub.format(document.units)} ед.</span><strong>${fmt(document.final)}</strong></div><div class="summary-row"><span>Продажа ${fmt(document.revenue)} · маржа ${fmt(document.gross)}</span><strong>${document.tax ? `−${fmt(document.tax)} (7% от продажи)` : 'без вычета'}</strong></div>${document.logistics ? `<div class="summary-row"><span>Логистика</span><strong>−${fmt(document.logistics)}</strong></div>` : ''}</div>` : '';
       return `<section class="report-document">${header}${groups}${documentTotal}</section>`;
     }).join('');
-    const tax = model.tax ? `<div class="summary-row"><span>Вычет 7%</span><strong>−${fmt(model.tax)}</strong></div>` : '';
+    const tax = model.tax ? `<div class="summary-row"><span>Вычет 7% от продажи</span><strong>−${fmt(model.tax)}</strong></div>` : '';
     const logistics = model.logistics ? `<div class="summary-row"><span>Логистика · пропорционально ${rub.format(model.units)} ед.</span><strong>−${fmt(model.logistics)}</strong></div>` : '';
     $('reportTotal').innerHTML = `<div class="summary-row"><span>${model.lines} поз. · ${rub.format(model.units)} ед.</span><strong>Продажа ${fmt(model.revenue)}</strong></div><div class="summary-row"><span>Цена отгрузки БАСА</span><strong>${fmt(model.baseTotal)}</strong></div><div class="summary-row"><span>Маржа товаров</span><strong>${fmt(model.gross)}</strong></div>${tax}${logistics}<div class="summary-row final"><span>ИТОГОВАЯ МАРЖА</span><strong>${fmt(model.final)}</strong></div>`;
     state.reportText = buildPlainReport(model);
